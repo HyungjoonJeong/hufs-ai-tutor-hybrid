@@ -128,7 +128,7 @@ def run_rag(question: str, answer_style: str, model_type: str = "gpt", chat_hist
     # 1. 모델 및 히스토리 설정
     if model_type == "gpt":
         llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
-        history = st.session_state.gpt_messages[:-1]
+ 
     else:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
 # st.session_state 대신 인자로 받은 chat_history 사용
