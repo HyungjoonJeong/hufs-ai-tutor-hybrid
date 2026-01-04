@@ -5,6 +5,7 @@ import streamlit as st
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def extract_documents_from_pdf(file_path: str, source_name: str):
     vision_model = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
