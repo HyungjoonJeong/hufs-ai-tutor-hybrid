@@ -37,7 +37,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("HUFS RAG 기반 AI 튜터")
+st.title("HUFS RAG 기반 AI 튜터(Gemini 2.5 & GPT-5.2)")
 st.caption("강의 자료 기반으로 Gemini와 GPT를 종합하여 답변하며 출처를 명확히 제시합니다.")
 
 # --------------------------------
@@ -55,7 +55,7 @@ if "vector_db" not in st.session_state:
 # --------------------------------
 def classify_question(question: str) -> str:
     # 텍스트 분류는 설정이 복잡한 Gemini 대신 GPT-4o-mini를 씁니다. (매우 저렴)
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     prompt = f"다음 질문을 'concept', 'calculation', 'summary' 중 하나로 분류해. 한 단어만 답해. 질문: {question}"
     result = llm.invoke(prompt)
     return result.content.strip().lower()
@@ -109,18 +109,18 @@ def run_calculation_chain(question: str):
 # 일반 RAG 체인
 # --------------------------------
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
-def run_rag(question: str, answer_style: str):
-    # 답변은 더 똑똑한 GPT-4o가 담당
-    llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
+# run_rag 정의 부분 수정
+def run_rag(question: str, answer_style: str, model_type: str = "gpt"):
+    if model_type == "gpt":
+        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
+        # GPT 전용 대화 기록 가져오기
+        history = st.session_state.gpt_messages[:-1] 
+    else:
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        # Gemini 전용 대화 기록 가져오기
+        history = st.session_state.gemini_messages[:-1]
 
-    retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
-    docs = retriever.invoke(question)
-
-    context = "\n\n".join([d.page_content for d in docs])
-
-    chat_history = "\n".join(
-        [f"{m['role']}: {m['content']}" for m in st.session_state.messages]
-    )
+    chat_history = "\n".join([f"{m['role']}: {m['content']}" for m in history])
 
     length_instruction = (
         "핵심만 간결하게 답하라."
@@ -139,7 +139,7 @@ def run_rag(question: str, answer_style: str):
 3. 마지막에 참고 자료와 출처를 명시하라.
 4. 답변은 최소 3문단 이상의 충분한 분량으로 작성할 것.
 5. 강의 자료에 있는 예시나 수치를 적극적으로 인용할 것.
-6. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 한 문장 덧붙일 것.
+6. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 한두 문장 덧붙일 것.
 7. {length_instruction}
 
 [이전 대화]
@@ -239,36 +239,48 @@ if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        st.session_state.messages.append(
-            {"role": "user", "content": question}
-        )
+        # 1. 공통 질문 저장 (UI 출력용 및 각 모델 히스토리용)
+        st.session_state.gpt_messages.append({"role": "user", "content": question})
+        st.session_state.gemini_messages.append({"role": "user", "content": question})
 
+        # 2. 사용자 질문 화면 출력
         with st.chat_message("user"):
             st.markdown(question)
 
+        # 3. 질문 유형 분류 (공통 사용)
         q_type = classify_question(question)
 
-        with st.chat_message("assistant"):
-            with st.spinner("답변 생성 중..."):
-                if q_type == "calculation":
-                    answer, sources = run_calculation_chain(question)
-                else:
-                    answer, sources = run_rag(question, answer_style)
+        # 4. 좌우 2컬럼 레이아웃 생성
+        col1, col2 = st.columns(2)
 
+        # --- 왼쪽: GPT-4o 섹션 ---
+        with col1:
+            with st.chat_message("assistant", avatar="🤖"):
+                st.subheader("GPT-5.2")
+                with st.spinner("GPT 답변 생성 중..."):
+                    # GPT 전용 로직 호출 (히스토리 관리를 위해 model_type 인자 추가 권장)
+                    answer_gpt, sources = run_rag(question, answer_style, model_type="gpt")
+                    
+                    # 출처 정리
+                    refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
+                    final_gpt = f"{answer_gpt}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+                    
+                    st.markdown(final_gpt)
+                    st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
 
-                refs = set()
-                for d in sources:
-                    refs.add(
-                        f"- {d.metadata['source']} p.{d.metadata['page'] + 1}"
-                    )
-
-                final_answer = (
-                    f"{answer}\n\n---\n"
-                    f"참고 자료:\n" + "\n".join(sorted(refs))
-                )
-
-                st.markdown(final_answer)
-
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": final_answer}
-                )
+        # --- 오른쪽: Gemini 섹션 ---
+        with col2:
+            with st.chat_message("assistant", avatar="♊"):
+                st.subheader("Gemini 2.5")
+                with st.spinner("Gemini 답변 생성 중..."):
+                    # Gemini 전용 로직 호출
+                    if q_type == "calculation":
+                        answer_gem, sources = run_calculation_chain(question)
+                    else:
+                        answer_gem, sources = run_rag(question, answer_style, model_type="gemini")
+                    
+                    refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
+                    final_gem = f"{answer_gem}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+                    
+                    st.markdown(final_gem)
+                    st.session_state.gemini_messages.append({"role": "assistant", "content": final_gem})
