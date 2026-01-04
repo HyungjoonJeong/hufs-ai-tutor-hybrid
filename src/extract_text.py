@@ -6,59 +6,53 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+import streamlit as st
 
 def extract_documents_from_pdf(file_path: str, source_name: str):
-    """
-    모든 PDF 페이지를 이미지로 변환하여 Gemini Flash로 OCR을 수행합니다.
-    텍스트, 표, 그림 설명을 모두 포함하여 상세한 문맥을 생성합니다.
-    """
-    # 모델명은 1.5-flash가 이미지 처리에 가장 효율적입니다.
     vision_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-    
     doc = fitz.open(file_path)
     documents = []
+    total = len(doc)
 
-    for page_number in range(len(doc)):
+    for page_number in range(total):
+        for page_number in range(total):
+        # UI 업데이트용 (함수 안에서 스트림릿 UI를 직접 건드림)
+        st.toast(f"📄 {page_number + 1} / {total} 페이지 분석 중...")
+        
         page = doc[page_number]
+        text = page.get_text().strip()
         
-        # 1. 페이지를 고해상도 이미지로 변환
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-        img_data = pix.tobytes("png")
-        
-        # 2. 이미지를 Base64로 인코딩
-        encoded_image = base64.b64encode(img_data).decode("utf-8")
-        
-        # 3. Gemini에게 상세 분석 요청
-        image_message = {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
-        }
-        
-        text_message = {
-            "type": "text",
-            "text": (
-                "너는 대학 강의 자료를 분석하는 전문가야. 이 페이지의 내용을 아주 상세하게 텍스트로 복원해줘.\n"
-                "1. 모든 글자를 누락 없이 추출할 것.\n"
-                "2. 표(Table)는 마크다운 형식을 사용하여 구조를 유지할 것.\n"
-                "3. 그림이나 그래프가 있다면 무엇을 설명하는지 구체적으로 기술할 것.\n"
-                "4. 수식이 있다면 가급적 텍스트나 LaTeX 형식으로 표현할 것."
-            )
-        }
-        
-        try:
-            # 시각 정보를 포함한 메시지 전송
-            response = vision_model.invoke([HumanMessage(content=[text_message, image_message])])
-            page_content = response.content
-        except Exception as e:
-            page_content = f"OCR 분석 중 에러 발생 (페이지 {page_number}): {str(e)}"
+        # [전략] 텍스트가 일정량(예: 100자) 이상 있고, 이미지가 적으면 바로 텍스트 추출
+        # 그렇지 않으면(이미지 PDF거나 표가 많으면) Gemini OCR 가동
+        if len(text) > 100:
+            page_content = f"[Text Extraction]\n{text}"
+            st.toast(f"⚡ {page_number + 1}p: 텍스트 직독 중...")
+        else:
+            st.toast(f"👁️ {page_number + 1}p: 이미지 분석(OCR) 중...")
+            # 고해상도 이미지 변환
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img_data = pix.tobytes("png")
+            encoded_image = base64.b64encode(img_data).decode("utf-8")
+            
+            image_message = {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
+            }
+            text_message = {
+                "type": "text",
+                "text": "이 페이지의 내용을 아주 상세하게 텍스트로 복원해줘. 표는 마크다운으로, 그림은 설명으로 포함해줘."
+            }
+            
+            try:
+                response = vision_model.invoke([HumanMessage(content=[text_message, image_message])])
+                page_content = f"[OCR Extraction]\n{response.content}"
+            except Exception as e:
+                page_content = f"에러 발생: {str(e)}"
 
         documents.append(
             Document(
                 page_content=page_content,
-                metadata={
-                    "source": source_name,
-                    "page": page_number
-                }
+                metadata={"source": source_name, "page": page_number}
             )
         )
 

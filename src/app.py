@@ -162,6 +162,9 @@ def run_rag(question: str, answer_style: str):
 # --------------------------------
 # 사이드바
 # --------------------------------
+# --------------------------------
+# 사이드바
+# --------------------------------
 with st.sidebar:
     st.header("설정")
 
@@ -184,40 +187,47 @@ with st.sidebar:
     )
 
     if uploaded_files and st.button("학습 시작"):
+        # --- 여기서부터 수정 (진행 바 및 텍스트 공간 확보) ---
+        status_placeholder = st.empty()
+        progress_bar = st.progress(0)
+        
         with st.spinner("자료 분석 중..."):
             all_docs = []
 
-            for file in uploaded_files:
+            for i, file in enumerate(uploaded_files):
                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
                     tmp.write(file.getvalue())
                     tmp_path = tmp.name
 
+                # 🧐 현재 어떤 파일을 분석 중인지 표시
+                status_placeholder.info(f"📄 '{file.name}' 분석 중... (파일 {i+1}/{len(uploaded_files)})")
+                
+                # 하이브리드 OCR 함수 호출
                 docs = extract_documents_from_pdf(
                     tmp_path,
                     source_name=file.name
                 )
                 all_docs.extend(docs)
                 os.remove(tmp_path)
+                
+                # 파일 단위로 진행률 업데이트
+                progress_bar.progress(int((i + 1) / len(uploaded_files) * 50))
 
+            status_placeholder.info("🧠 지식 데이터베이스 구축 중... (거의 다 됐어요!)")
+            
             chunks = split_documents(all_docs)
-
             embeddings = GoogleGenerativeAIEmbeddings(
                 model="models/embedding-001"
             )
 
-            # 수정 전 (에러 발생)
-            # st.session_state.vector_db = Chroma.from_documents(
-            #     documents=chunks,
-            #     embedding=embeddings,
-            #     persist_directory="./chroma_db"
-            # )
-
-            # 수정 후 (권장)
             st.session_state.vector_db = FAISS.from_documents(
                 chunks, embedding=embeddings
             )  
 
-            st.success("학습 완료")
+            # 모든 과정 완료 처리
+            progress_bar.progress(100)
+            status_placeholder.success(f"✅ 총 {len(uploaded_files)}개의 파일 학습 완료!")
+            # --- 여기까지 수정 ---
 
 # --------------------------------
 # 채팅 UI
