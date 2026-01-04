@@ -55,7 +55,7 @@ if "vector_db" not in st.session_state:
 # --------------------------------
 def classify_question(question: str) -> str:
     # 텍스트 분류는 설정이 복잡한 Gemini 대신 GPT-4o-mini를 씁니다. (매우 저렴)
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
     prompt = f"다음 질문을 'concept', 'calculation', 'summary' 중 하나로 분류해. 한 단어만 답해. 질문: {question}"
     result = llm.invoke(prompt)
     return result.content.strip().lower()
@@ -111,7 +111,7 @@ def run_calculation_chain(question: str):
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 def run_rag(question: str, answer_style: str):
     # 답변은 더 똑똑한 GPT-4o가 담당
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
 
     retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
     docs = retriever.invoke(question)
