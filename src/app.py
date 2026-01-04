@@ -296,6 +296,17 @@ else:
         gpt_h = st.session_state.gpt_messages.copy()
         gem_h = st.session_state.gemini_messages.copy()
         
+# 2. 질문 저장 및 사용자 메시지 출력
+        st.session_state.gpt_messages.append({"role": "user", "content": question})
+        st.session_state.gemini_messages.append({"role": "user", "content": question})
+
+        with st.chat_message("user"):
+            st.markdown(question)
+
+        # 3. 레이아웃 컬럼 생성 (NameError 방지를 위해 미리 선언)
+        col1, col2 = st.columns(2)
+        q_type = classify_question(question)
+
         # 2. 헬퍼 함수 정의 (전달받은 vdb를 run_rag에 다시 던져줌)
         def fetch_gpt():
             if q_type == "calculation":
