@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage
 
 def extract_documents_from_pdf(file_path: str, source_name: str):
     # Gemini 모델 설정
-    vision_model = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+    vision_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
     
     doc = fitz.open(file_path)
     documents = []
