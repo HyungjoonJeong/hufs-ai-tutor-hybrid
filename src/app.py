@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import tempfile
+import concurrent.futures # 파일 최상단에 추가해주세요!
 from dotenv import load_dotenv
 
 # 1. 핵심 설계도 (Core)
@@ -77,10 +78,10 @@ def classify_question(question: str) -> str:
 def run_calculation_chain(question: str, model_type: str = "gemini"):
     # 1. 모델 선택
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        llm = ChatOpenAI(model="gpt-5.2", temperature=0)
     else:
         # 2026년 기준 최신 안정 버전인 1.5-flash 권장
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
     # 2. 관련 문서 검색
     docs = st.session_state.vector_db.similarity_search(question, k=7)
@@ -126,10 +127,10 @@ def run_calculation_chain(question: str, model_type: str = "gemini"):
 def run_rag(question: str, answer_style: str, model_type: str = "gpt"):
     # 1. 모델 및 히스토리 설정
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
         history = st.session_state.gpt_messages[:-1]
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
         history = st.session_state.gemini_messages[:-1]
 
     # 2. 컨텍스트 검색
@@ -279,52 +280,73 @@ with view_col2:
 # --------------------------------
 # 신규 질문 입력 및 처리
 # --------------------------------
+
 if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        # 1. 각각의 보관함에 사용자 질문 저장
+        # 1. 공통 질문 저장
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
 
-        # 2. 실시간 답변을 위한 컬럼 생성
-        col1, col2 = st.columns(2)
+        # 2. 사용자 질문 화면 출력
+        with st.chat_message("user"):
+            st.markdown(question)
 
-        # 3. 질문 유형 분류 (한 번만 수행)
+        # 3. 질문 유형 분류
         q_type = classify_question(question)
 
-        # --- 왼쪽: GPT-4o 실시간 답변 섹션 ---
-        with col1:
-            with st.chat_message("user"):
-                st.markdown(question)
-            with st.chat_message("assistant", avatar="🤖"):
-                st.subheader("GPT-4o")
-                with st.spinner("GPT 답변 생성 중..."):
-                    # [수정 포인트] 계산 문제 여부에 따라 함수 호출
-                    if q_type == "calculation":
-                        answer_gpt, sources = run_calculation_chain(question, model_type="gpt")
-                    else:
-                        answer_gpt, sources = run_rag(question, answer_style, model_type="gpt")
-                    
-                    refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
-                    final_gpt = f"{answer_gpt}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-                    st.markdown(final_gpt)
-                    st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
+        # 4. 좌우 컬럼 생성
+        col1, col2 = st.columns(2)
+        
+        # --- 병렬 실행 로직 시작 ---
+        # 두 모델을 동시에 호출하기 위한 '작업실'을 만듭니다.
+        def get_gpt_answer():
+            if q_type == "calculation":
+                ans, src = run_calculation_chain(question, model_type="gpt")
+            else:
+                ans, src = run_rag(question, answer_style, model_type="gpt")
+            refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
+            return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
 
-        # --- 오른쪽: Gemini 1.5 실시간 답변 섹션 ---
-        with col2:
-            with st.chat_message("user"):
-                st.markdown(question)
-            with st.chat_message("assistant", avatar="♊"):
-                st.subheader("Gemini 1.5")
-                with st.spinner("Gemini 답변 생성 중..."):
-                    # [수정 포인트] 계산 문제 여부에 따라 함수 호출
-                    if q_type == "calculation":
-                        answer_gem, sources = run_calculation_chain(question, model_type="gemini")
-                    else:
-                        answer_gem, sources = run_rag(question, answer_style, model_type="gemini")
-                    
-                    refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
-                    final_gem = f"{answer_gem}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-                    st.markdown(final_gem)
-                    st.session_state.gemini_messages.append({"role": "assistant", "content": final_gem})
+        def get_gemini_answer():
+            if q_type == "calculation":
+                ans, src = run_calculation_chain(question, model_type="gemini")
+            else:
+                ans, src = run_rag(question, answer_style, model_type="gemini")
+            refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
+            return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+
+        # 동시에 실행!
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # 두 작업을 스레드 풀에 던집니다.
+            future_gpt = executor.submit(get_gpt_answer)
+            future_gemini = executor.submit(get_gemini_answer)
+
+            # 화면에는 동시에 뱅글뱅글(Spinner)을 띄웁니다.
+            with col1:
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.subheader("GPT-5.2")
+                    placeholder_gpt = st.empty()
+                    with placeholder_gpt:
+                        st.spinner("GPT 분석 중...")
+            
+            with col2:
+                with st.chat_message("assistant", avatar="♊"):
+                    st.subheader("Gemini 2.5")
+                    placeholder_gemini = st.empty()
+                    with placeholder_gemini:
+                        st.spinner("Gemini 분석 중...")
+
+            # 결과가 먼저 나오는 대로 가져와서 화면에 뿌립니다.
+            final_gpt = future_gpt.result()
+            final_gemini = future_gemini.result()
+
+            # 결과 화면 업데이트 및 세션 저장
+            with col1:
+                placeholder_gpt.markdown(final_gpt)
+                st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
+            
+            with col2:
+                placeholder_gemini.markdown(final_gemini)
+                st.session_state.gemini_messages.append({"role": "assistant", "content": final_gemini})
