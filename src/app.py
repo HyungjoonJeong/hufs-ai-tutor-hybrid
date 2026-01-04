@@ -37,8 +37,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("HUFS RAG 기반 AI 튜터(Gemini)")
-st.caption("강의 자료 기반으로 답변하며 출처를 명확히 제시합니다.")
+st.title("HUFS RAG 기반 AI 튜터")
+st.caption("강의 자료 기반으로 Gemini와 GPT를 종합하여 답변하며 출처를 명확히 제시합니다.")
 
 # --------------------------------
 # 세션 상태
@@ -54,10 +54,12 @@ if "vector_db" not in st.session_state:
 # 질문 분류기
 # --------------------------------
 def classify_question(question: str) -> str:
-    llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", temperature=0)
-    prompt = f"다음 질문을 'concept', 'calculation', 'summary' 중 하나로 분류하라.\n질문: {question}"
+    # 텍스트 분류는 설정이 복잡한 Gemini 대신 GPT-4o-mini를 씁니다. (매우 저렴)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    prompt = f"다음 질문을 'concept', 'calculation', 'summary' 중 하나로 분류해. 한 단어만 답해. 질문: {question}"
     result = llm.invoke(prompt)
     return result.content.strip().lower()
+
 
 # --------------------------------
 # 계산 문제 전용 체인

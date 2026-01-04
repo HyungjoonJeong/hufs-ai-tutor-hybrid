@@ -1,9 +1,11 @@
 streamlit
 python-dotenv
 pypdf
-langchain
+Lang chain
 langchain-community
 langchain-core
 langchain-google-genai
 langchain-openai
 faiss-cpu
+pymupdf
+pdf2image

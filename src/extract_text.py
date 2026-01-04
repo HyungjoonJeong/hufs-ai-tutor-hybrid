@@ -1,5 +1,6 @@
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pypdf import PdfReader
 
 
