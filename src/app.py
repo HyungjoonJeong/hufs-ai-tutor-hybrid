@@ -38,8 +38,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("HUFS RAG 기반 AI 튜터 (Gemini 2.5 & GPT-5.2)")
-st.caption("강의 자료 기반으로 Gemini와 GPT를 종합하여 답변하며 출처를 명확히 제시합니다.")
+st.title("HUFS RAG 기반 AI 튜터 (GPT-5.2 & Gemini 2.5)")
+st.caption("강의 자료 기반으로 GPT와 Gemini를 종합하여 답변하며 출처를 명확히 제시합니다.")
 
 # --------------------------------
 # 세션 상태
@@ -124,14 +124,19 @@ def run_calculation_chain(question: str, model_type: str = "gemini"):
 # --------------------------------
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
-def run_rag(question: str, answer_style: str, model_type: str = "gpt"):
+def run_rag(question: str, answer_style: str, model_type: str = "gpt", chat_history: list = None):
     # 1. 모델 및 히스토리 설정
     if model_type == "gpt":
         llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
         history = st.session_state.gpt_messages[:-1]
     else:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
-        history = st.session_state.gemini_messages[:-1]
+# st.session_state 대신 인자로 받은 chat_history 사용
+    if chat_history is None:
+        chat_history = []
+    
+    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history])
+
 
     # 2. 컨텍스트 검색
     retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
@@ -285,43 +290,43 @@ if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        # 1. 공통 질문 저장
+        # 1. 메모리 데이터 미리 추출 (스레드 내부에서는 st.session_state 접근 불가)
+        gpt_history = st.session_state.gpt_messages.copy()
+        gemini_history = st.session_state.gemini_messages.copy()
+        vdb = st.session_state.vector_db
+        
+        # 2. 공통 질문 저장
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
 
-        # 2. 사용자 질문 화면 출력
         with st.chat_message("user"):
             st.markdown(question)
 
-        # 3. 질문 유형 분류
         q_type = classify_question(question)
-
-        # 4. 좌우 컬럼 생성
         col1, col2 = st.columns(2)
         
-        # --- 병렬 실행 로직 시작 ---
-        # 두 모델을 동시에 호출하기 위한 '작업실'을 만듭니다.
-        def get_gpt_answer():
+        # 3. 작업 정의 (외부에서 데이터를 인자로 받음)
+        def get_gpt_answer(history, db):
             if q_type == "calculation":
                 ans, src = run_calculation_chain(question, model_type="gpt")
             else:
-                ans, src = run_rag(question, answer_style, model_type="gpt")
+                # run_rag 내부에서 st.session_state를 쓰지 않도록 인자를 넘겨줌
+                ans, src = run_rag(question, answer_style, model_type="gpt", chat_history=history)
             refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
             return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
 
-        def get_gemini_answer():
+        def get_gemini_answer(history, db):
             if q_type == "calculation":
                 ans, src = run_calculation_chain(question, model_type="gemini")
             else:
-                ans, src = run_rag(question, answer_style, model_type="gemini")
+                ans, src = run_rag(question, answer_style, model_type="gemini", chat_history=history)
             refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
             return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
 
-        # 동시에 실행!
+        # 4. 병렬 실행 (데이터 복사본 전달)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            # 두 작업을 스레드 풀에 던집니다.
-            future_gpt = executor.submit(get_gpt_answer)
-            future_gemini = executor.submit(get_gemini_answer)
+            future_gpt = executor.submit(get_gpt_answer, gpt_history, vdb)
+            future_gemini = executor.submit(get_gemini_answer, gemini_history, vdb)
 
             # 화면에는 동시에 뱅글뱅글(Spinner)을 띄웁니다.
             with col1:
