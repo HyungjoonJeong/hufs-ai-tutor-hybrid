@@ -43,9 +43,18 @@ st.caption("강의 자료 기반으로 Gemini와 GPT를 종합하여 답변하�
 # --------------------------------
 # 세션 상태
 # --------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# --- app.py 상단 세션 상태 초기화 부분 ---
 
+if "gpt_messages" not in st.session_state:
+    st.session_state.gpt_messages = []
+
+if "gemini_messages" not in st.session_state:
+    st.session_state.gemini_messages = []
+
+# 기존 messages는 더 이상 쓰지 않지만, 
+# 혹시 모르니 남겨두거나 아래처럼 깔끔하게 정리하세요.
+# if "messages" not in st.session_state:
+#     st.session_state.messages = []
 
 if "vector_db" not in st.session_state:
     st.session_state.vector_db = None
@@ -62,25 +71,29 @@ def classify_question(question: str) -> str:
 
 
 # --------------------------------
-# 계산 문제 전용 체인
 # --------------------------------
-def run_calculation_chain(question: str):
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        temperature=0
-    )
+# 계산 문제 전용 체인 (GPT/Gemini 대응)
+# --------------------------------
+def run_calculation_chain(question: str, model_type: str = "gemini"):
+    # 1. 모델 선택
+    if model_type == "gpt":
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    else:
+        # 2026년 기준 최신 안정 버전인 1.5-flash 권장
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
 
-    docs = st.session_state.vector_db.similarity_search(question, k=7  )
+    # 2. 관련 문서 검색
+    docs = st.session_state.vector_db.similarity_search(question, k=7)
     context = "\n\n".join([d.page_content for d in docs])
 
     template = """
-너는 대학 과목 계산 문제를 푸는 조교이다.
+너는 대학 과목 계산 문제를 푸는 조교이다. 제공된 [문맥]의 공식과 수치를 바탕으로 문제를 풀어라.
 
 [규칙]
-1. 풀이 과정을 단계별로 번호를 매겨 설명하라.
-2. 수식을 명확히 제시하라.
-3. 마지막에 최종 답을 정리하라.
-4. 문맥에 없는 정보는 사용하지 마라.
+1. 풀이 과정을 단계별로 번호를 매겨 상세히 설명하라.
+2. 수식은 LaTeX 형식이나 명확한 기호를 사용하여 제시하라.
+3. 마지막에 최종 답을 '정답: '과 함께 정리하라.
+4. 문맥에 없는 정보는 가급적 사용하지 말고, 데이터가 부족하면 문맥을 참고하라고 안내하라.
 
 [문맥]
 {context}
@@ -96,6 +109,7 @@ def run_calculation_chain(question: str):
         template=template
     )
 
+    # 3. 답변 생성
     response = llm.invoke(
         prompt.format(
             context=context,
@@ -104,7 +118,6 @@ def run_calculation_chain(question: str):
     )
 
     return response.content, docs
-
 # --------------------------------
 # 일반 RAG 체인
 # --------------------------------
@@ -173,8 +186,10 @@ with st.sidebar:
         index=1
     )
 
+    # 사이드바의 대화 초기화 버튼 부분
     if st.button("대화 초기화"):
-        st.session_state.messages = []
+        st.session_state.gpt_messages = []
+        st.session_state.gemini_messages = []
         st.rerun()
 
     st.divider()
@@ -229,58 +244,75 @@ with st.sidebar:
             # --- 여기까지 수정 ---
 
 # --------------------------------
-# 채팅 UI
 # --------------------------------
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# 채팅 UI (이전 대화 기록 복원)
+# --------------------------------
+# 화면을 2개로 나눠서 각 모델의 이전 대화 기록을 좌우에 배치합니다.
+view_col1, view_col2 = st.columns(2)
 
+with view_col1:
+    for msg in st.session_state.gpt_messages:
+        # 사용자의 질문과 GPT의 답변을 차례로 출력
+        avatar = "🤖" if msg["role"] == "assistant" else None
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
+
+with view_col2:
+    for msg in st.session_state.gemini_messages:
+        # 사용자의 질문과 Gemini의 답변을 차례로 출력
+        avatar = "♊" if msg["role"] == "assistant" else None
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
+
+# --------------------------------
+# 신규 질문 입력 및 처리
+# --------------------------------
 if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        # 1. 공통 질문 저장 (UI 출력용 및 각 모델 히스토리용)
+        # 1. 각각의 보관함에 사용자 질문 저장
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
 
-        # 2. 사용자 질문 화면 출력
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        # 3. 질문 유형 분류 (공통 사용)
-        q_type = classify_question(question)
-
-        # 4. 좌우 2컬럼 레이아웃 생성
+        # 2. 실시간 답변을 위한 컬럼 생성
         col1, col2 = st.columns(2)
 
-        # --- 왼쪽: GPT-4o 섹션 ---
+        # 3. 질문 유형 분류 (한 번만 수행)
+        q_type = classify_question(question)
+
+        # --- 왼쪽: GPT-4o 실시간 답변 섹션 ---
         with col1:
+            with st.chat_message("user"):
+                st.markdown(question)
             with st.chat_message("assistant", avatar="🤖"):
-                st.subheader("GPT-5.2")
+                st.subheader("GPT-4o")
                 with st.spinner("GPT 답변 생성 중..."):
-                    # GPT 전용 로직 호출 (히스토리 관리를 위해 model_type 인자 추가 권장)
-                    answer_gpt, sources = run_rag(question, answer_style, model_type="gpt")
+                    # [수정 포인트] 계산 문제 여부에 따라 함수 호출
+                    if q_type == "calculation":
+                        answer_gpt, sources = run_calculation_chain(question, model_type="gpt")
+                    else:
+                        answer_gpt, sources = run_rag(question, answer_style, model_type="gpt")
                     
-                    # 출처 정리
                     refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
                     final_gpt = f"{answer_gpt}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-                    
                     st.markdown(final_gpt)
                     st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
 
-        # --- 오른쪽: Gemini 섹션 ---
+        # --- 오른쪽: Gemini 1.5 실시간 답변 섹션 ---
         with col2:
+            with st.chat_message("user"):
+                st.markdown(question)
             with st.chat_message("assistant", avatar="♊"):
-                st.subheader("Gemini 2.5")
+                st.subheader("Gemini 1.5")
                 with st.spinner("Gemini 답변 생성 중..."):
-                    # Gemini 전용 로직 호출
+                    # [수정 포인트] 계산 문제 여부에 따라 함수 호출
                     if q_type == "calculation":
-                        answer_gem, sources = run_calculation_chain(question)
+                        answer_gem, sources = run_calculation_chain(question, model_type="gemini")
                     else:
                         answer_gem, sources = run_rag(question, answer_style, model_type="gemini")
                     
                     refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in sources])
                     final_gem = f"{answer_gem}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-                    
                     st.markdown(final_gem)
                     st.session_state.gemini_messages.append({"role": "assistant", "content": final_gem})
