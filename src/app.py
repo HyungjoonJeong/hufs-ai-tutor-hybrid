@@ -124,25 +124,28 @@ def run_calculation_chain(question: str, model_type: str = "gemini"):
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
 def run_rag(question: str, answer_style: str, model_type: str = "gpt"):
+    # 1. 모델 및 히스토리 설정
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
-        # GPT 전용 대화 기록 가져오기
-        history = st.session_state.gpt_messages[:-1] 
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+        history = st.session_state.gpt_messages[:-1]
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
-        # Gemini 전용 대화 기록 가져오기
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
         history = st.session_state.gemini_messages[:-1]
 
-    chat_history = "\n".join([f"{m['role']}: {m['content']}" for m in history])
+    # 2. 컨텍스트 검색
+    retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
+    docs = retriever.invoke(question)
+    context_text = "\n\n".join([d.page_content for d in docs])
+
+    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in history])
 
     length_instruction = (
-        "핵심만 간결하게 답하라."
-        if answer_style == "짧게"
-        else
-        "초보자도 이해할 수 있도록 자세히 설명하라."
+        "핵심만 간결하게 답하라." if answer_style == "짧게" 
+        else "초보자도 이해할 수 있도록 자세히 설명하라."
     )
 
-    prompt = f"""
+    # 3. 프롬프트 구성 (f-string 대신 일반 문자열과 .format() 추천)
+    template = """
 당신은 한국외국어대학교의 1타 강사 AI 튜터입니다. 
 제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
 
@@ -167,8 +170,17 @@ def run_rag(question: str, answer_style: str, model_type: str = "gpt"):
 답변 (전문적이고 상세하게):
 """
 
+# 에러 방지를 위해 .format() 사용
+    prompt = template.format(
+        length_instruction=length_instruction,
+        chat_history=chat_history_str,
+        context=context_text,
+        question=question
+    )
+
     response = llm.invoke(prompt)
     return response.content, docs
+
 
 
 # --------------------------------
