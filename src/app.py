@@ -70,7 +70,7 @@ def run_calculation_chain(question: str):
         temperature=0
     )
 
-    docs = st.session_state.vector_db.similarity_search(question, k=3)
+    docs = st.session_state.vector_db.similarity_search(question, k=7  )
     context = "\n\n".join([d.page_content for d in docs])
 
     template = """
@@ -113,7 +113,7 @@ def run_rag(question: str, answer_style: str):
     # 답변은 더 똑똑한 GPT-4o가 담당
     llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
-    retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 3})
+    retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
     docs = retriever.invoke(question)
 
     context = "\n\n".join([d.page_content for d in docs])
@@ -130,13 +130,18 @@ def run_rag(question: str, answer_style: str):
     )
 
     prompt = f"""
-너는 대학 강의를 돕는 AI 튜터이다.
+당신은 한국외국어대학교의 1타 강사 AI 튜터입니다. 
+제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
 
 [규칙]
 1. 반드시 문맥에 근거해 답하라.
 2. 없는 내용은 추측하지 마라.
 3. 마지막에 참고 자료를 명시하라.
-4. {length_instruction}
+4. 답변은 최소 3문단 이상의 충분한 분량으로 작성할 것.
+5. 질문과 관련된 핵심 개념을 먼저 정의하고 상세 설명을 이어갈 것.
+6. 강의 자료에 있는 예시나 수치를 적극적으로 인용할 것.
+7. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 한 문장 덧붙일 것.
+8. {length_instruction}
 
 [이전 대화]
 {chat_history}
@@ -147,7 +152,7 @@ def run_rag(question: str, answer_style: str):
 [질문]
 {question}
 
-답변:
+답변 (전문적이고 상세하게):
 """
 
     response = llm.invoke(prompt)

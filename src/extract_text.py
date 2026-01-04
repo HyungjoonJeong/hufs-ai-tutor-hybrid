@@ -68,7 +68,7 @@ def extract_documents_from_pdf(file_path: str, source_name: str):
 def split_documents(documents):
     # OCR로 생성된 텍스트는 정보 밀도가 높으므로 chunk 크기를 넉넉하게 잡습니다.
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
+        chunk_size=2000,
         chunk_overlap=200
     )
     return splitter.split_documents(documents)
