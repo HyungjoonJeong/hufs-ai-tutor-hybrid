@@ -17,8 +17,8 @@ def extract_documents_from_pdf(file_path: str, source_name: str):
     for page_number in range(total):
         for page_number in range(total):
         # UI 업데이트용 (함수 안에서 스트림릿 UI를 직접 건드림)
-        st.toast(f"📄 {page_number + 1} / {total} 페이지 분석 중...")
-        
+            st.toast(f"📄 {page_number + 1} / {total} 페이지 분석 중...")
+
         page = doc[page_number]
         text = page.get_text().strip()
         
