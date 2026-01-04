@@ -75,7 +75,7 @@ def classify_question(question: str) -> str:
 # --------------------------------
 # 계산 문제 전용 체인 (GPT/Gemini 대응)
 # --------------------------------
-def run_calculation_chain(question: str, model_type: str = "gemini"):
+def run_calculation_chain(question: str, model_type: str, vector_db):
     # 1. 모델 선택
     if model_type == "gpt":
         llm = ChatOpenAI(model="gpt-5.2", temperature=0)
@@ -84,7 +84,8 @@ def run_calculation_chain(question: str, model_type: str = "gemini"):
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
     # 2. 관련 문서 검색
-    docs = st.session_state.vector_db.similarity_search(question, k=7)
+# 함수 내부에서 st.session_state.vector_db 대신 vector_db 사용!
+    docs = vector_db.similarity_search(question, k=7)
     context = "\n\n".join([d.page_content for d in docs])
 
     template = """
@@ -289,44 +290,38 @@ with view_col2:
 if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
-    else:
-        # 1. 메모리 데이터 미리 추출 (스레드 내부에서는 st.session_state 접근 불가)
-        gpt_history = st.session_state.gpt_messages.copy()
-        gemini_history = st.session_state.gemini_messages.copy()
+else:
+        # 1. 재료 미리 준비 (메인 스레드에서만 가능)
         vdb = st.session_state.vector_db
+        gpt_h = st.session_state.gpt_messages.copy()
+        gem_h = st.session_state.gemini_messages.copy()
         
-        # 2. 공통 질문 저장
-        st.session_state.gpt_messages.append({"role": "user", "content": question})
-        st.session_state.gemini_messages.append({"role": "user", "content": question})
-
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        q_type = classify_question(question)
-        col1, col2 = st.columns(2)
-        
-        # 3. 작업 정의 (외부에서 데이터를 인자로 받음)
-        def get_gpt_answer(history, db):
+        # 2. 헬퍼 함수 정의 (전달받은 vdb를 run_rag에 다시 던져줌)
+        def fetch_gpt():
             if q_type == "calculation":
-                ans, src = run_calculation_chain(question, model_type="gpt")
+                # 계산기 함수도 (question, model_type, vdb) 순서로 맞춰주세요!
+                ans, src = run_calculation_chain(question, "gpt", vdb)
             else:
-                # run_rag 내부에서 st.session_state를 쓰지 않도록 인자를 넘겨줌
-                ans, src = run_rag(question, answer_style, model_type="gpt", chat_history=history)
+                # [수정포인트] 인자 5개를 정확히 순서대로 전달!
+                ans, src = run_rag(question, answer_style, "gpt", gpt_h, vdb)
+            
             refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
             return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
 
-        def get_gemini_answer(history, db):
+        def fetch_gemini():
             if q_type == "calculation":
-                ans, src = run_calculation_chain(question, model_type="gemini")
+                ans, src = run_calculation_chain(question, "gemini", vdb)
             else:
-                ans, src = run_rag(question, answer_style, model_type="gemini", chat_history=history)
+                # [수정포인트] 여기도 인자 5개!
+                ans, src = run_rag(question, answer_style, "gemini", gem_h, vdb)
+            
             refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
             return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
 
-        # 4. 병렬 실행 (데이터 복사본 전달)
+        # 3. 병렬 실행
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_gpt = executor.submit(get_gpt_answer, gpt_history, vdb)
-            future_gemini = executor.submit(get_gemini_answer, gemini_history, vdb)
+            future_gpt = executor.submit(fetch_gpt)
+            future_gemini = executor.submit(fetch_gemini)
 
             # 화면에는 동시에 뱅글뱅글(Spinner)을 띄웁니다.
             with col1:
