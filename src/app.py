@@ -37,7 +37,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("HUFS RAG 기반 AI 튜터(Gemini 2.5 & GPT-5.2)")
+st.title("HUFS RAG 기반 AI 튜터 (Gemini 2.5 & GPT-5.2)")
 st.caption("강의 자료 기반으로 Gemini와 GPT를 종합하여 답변하며 출처를 명확히 제시합니다.")
 
 # --------------------------------

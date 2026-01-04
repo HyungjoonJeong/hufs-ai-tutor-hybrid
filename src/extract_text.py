@@ -7,51 +7,46 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 def extract_documents_from_pdf(file_path: str, source_name: str):
-    vision_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+    vision_model = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
     doc = fitz.open(file_path)
     documents = []
 
     for page_number in range(len(doc)):
         page = doc[page_number]
         
-        # 1. 텍스트 레이어 즉시 추출
+        # 1. 텍스트는 원본에서 즉시 추출
         page_text = page.get_text().strip()
         
-        # 2. 페이지 내 이미지 객체 찾기
-        image_list = page.get_images(full=True)
-        image_descriptions = []
+        # 2. 그림이 있는 경우에만 처리
+        if page.get_images(full=True):
+            st.toast(f"🖼️ {page_number + 1}p: 시각 자료 추출 중...")
+            
+            # 텍스트 영역을 모두 찾아서 흰색으로 가립니다 (Redact)
+            for text_instance in page.search_for(" "): # 모든 공백/문자 탐색
+                page.add_redact_annot(text_instance, fill=(1, 1, 1)) # 흰색 채우기
+            page.apply_redactions() # 가리기 적용
+            
+            # 이제 텍스트가 사라진 '그림만 남은 페이지'를 이미지로 변환
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            img_data = base64.b64encode(pix.tobytes("png")).decode("utf-8")
+            
+            # Gemini에게 순수하게 시각 정보만 분석 요청
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": "이 이미지에서 글자는 무시하고, 그림이나 도표가 무엇을 의미하는지 분석해줘."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_data}"}}
+                ]
+            )
+            
+            try:
+                res = vision_model.invoke([message])
+                page_text += f"\n\n[시각 자료 분석]\n{res.content}"
+            except:
+                pass
 
-        if image_list:
-            st.toast(f"🎨 {page_number + 1}p: 그림 {len(image_list)}개 분석 중...")
-            for img_index, img in enumerate(image_list):
-                xref = img[0]
-                base_image = doc.extract_image(xref)
-                image_bytes = base_image["image"]
-                
-                # Gemini에게 개별 이미지 분석 요청
-                encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                
-                image_message = {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
-                }
-                text_message = {
-                    "type": "text",
-                    "text": "이 그림/차트가 무엇을 설명하는지 핵심만 한두 문장으로 요약해줘."
-                }
-                
-                try:
-                    res = vision_model.invoke([HumanMessage(content=[text_message, image_message])])
-                    image_descriptions.append(f"[그림{img_index+1} 설명: {res.content}]")
-                except:
-                    continue
-
-        # 3. 텍스트와 그림 설명 결합
-        full_content = f"{page_text}\n\n" + "\n".join(image_descriptions)
-        
         documents.append(
             Document(
-                page_content=full_content,
+                page_content=page_text,
                 metadata={"source": source_name, "page": page_number}
             )
         )
