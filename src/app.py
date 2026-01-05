@@ -198,10 +198,6 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
             yield content  # 한 글자(또는 한 단어)씩 밖으로 내보냄
 
 
-    response = llm.invoke(prompt)
-    return response.content
-
-
 
 # --------------------------------
 # 사이드바
