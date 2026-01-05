@@ -80,7 +80,7 @@ def classify_question(question: str) -> str:
 def run_calculation_chain(question: str, model_type: str, vector_db):
     # 1. 모델 선택
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
+        llm = ChatOpenAI(model="gpt-5", temperature=0)
     else:
         # 2026년 기준 최신 안정 버전인 1.5-flash 권장
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
@@ -159,7 +159,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
     try:
         # 1. 모델 설정 (최신 모델명 반영)
         if model_type == "gpt":
-            llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7, streaming=True)
+            llm = ChatOpenAI(model="gpt-5", temperature=0.7, streaming=True)
         else:
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, streaming=True)
 
