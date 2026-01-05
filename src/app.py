@@ -135,12 +135,13 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
 def run_rag_stream(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
-    # 1. 모델 설정 (안정적인 모델명 사용)
+    # 1. 모델 설정
     if model_type == "gpt":
-        # streaming=True를 명시적으로 넣어주는 것이 좋습니다.
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.7, streaming=True)
+        # 현재 실존하는 모델명인 gpt-4o로 설정하는 것이 안전합니다.
+        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7, streaming=True)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
+        # [핵심 수정] Gemini도 스트리밍을 명시적으로 지원하도록 설정
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, streaming=True)
 
     # 2. 컨텍스트 및 히스토리 구성
     context_text = "\n\n".join([d.page_content for d in docs])
@@ -185,17 +186,19 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
         question=question
     )
 
-    # 3. 핵심: return 대신 yield 사용
-    # llm.invoke 대신 llm.stream을 사용합니다.
-    for chunk in llm.stream(prompt):
-        # 모델별로 chunk에서 내용을 꺼내는 방식이 다를 수 있어 안전하게 처리합니다.
-        if hasattr(chunk, 'content'):
-            content = chunk.content
-        else:
-            content = str(chunk)
+    # 3. 안전한 스트리밍 루프
+    try:
+        for chunk in llm.stream(prompt):
+            # Gemini의 경우 content가 직접 올 수도 있고, 조각으로 올 수도 있습니다.
+            if hasattr(chunk, 'content'):
+                content = chunk.content
+            else:
+                content = str(chunk)
             
-        if content:
-            yield content  # 한 글자(또는 한 단어)씩 밖으로 내보냄
+            if content:
+                yield content
+    except Exception as e:
+        yield f"\n⚠️ 모델 응답 중 오류 발생 ({model_type}): {str(e)}"
 
 
 
