@@ -91,7 +91,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
     context = "\n\n".join([d.page_content for d in docs])
 
     template = """
-너는 대학 과목 계산 문제를 푸는 조교이다. 제공된 [문맥]의 공식과 수치를 바탕으로 문제를 풀어라.
+제공된 [문맥]의 공식과 수치를 바탕으로 문제를 풀어라.
 
 [수식 작성 규칙 - 중요]
 1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
@@ -119,6 +119,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 7. 답변은 최소 3문단 이상의 충분한 분량으로 작성할 것.
 8. 강의 자료에 있는 예시를 적극적으로 인용할 것.
 9. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 두세 문장 덧붙일 것.
+10. 가독성 좋게 줄바꿈과 볼드체를 적극 활용할 것.
 
 [문맥]
 {context}
@@ -173,7 +174,6 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 
         template = """
 
-당신은 한국외국어대학교의 1타 강사 AI 튜터입니다. 
 제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
 
 [수식 작성 규칙 - 중요]
@@ -200,6 +200,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 7. 답변은 최소 3문단 이상의 충분한 분량으로 작성할 것.
 8. 강의 자료에 있는 예시나 수치를 적극적으로 인용할 것.
 9. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 두세 문장 덧붙일 것.
+10. 가독성 좋게 줄바꿈과 볼드체를 적극 활용할 것.
 
 [문맥]
 {context}
