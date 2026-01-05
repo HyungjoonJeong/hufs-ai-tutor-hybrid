@@ -97,7 +97,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
 2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
 3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
-   (예: $$f(x) = \\frac{1}{\\sigma\\sqrt{2\\pi}} \exp...$$)
+(예: $$f(x) = \\frac{{1}}{{\\sigma\\sqrt{{2\\pi}}}} \exp...$$)
 4. 절대 [ ] 나 ( ) 로 수식을 감싸지 마라. 오직 $와 $$만 사용한다.
 
 [규칙]
@@ -173,7 +173,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
 2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
 3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
-   (예: $$f(x) = \\frac{1}{\\sigma\\sqrt{2\\pi}} \exp...$$)
+(예: $$f(x) = \\frac{{1}}{{\\sigma\\sqrt{{2\\pi}}}} \exp...$$)
 4. 절대 [ ] 나 ( ) 로 수식을 감싸지 마라. 오직 $와 $$만 사용한다.
 
 [규칙]
