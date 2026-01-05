@@ -83,7 +83,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
         llm = ChatOpenAI(model="gpt-5.2", temperature=0)
     else:
         # 2026년 기준 최신 안정 버전인 1.5-flash 권장
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5", temperature=0)
 
     # 2. 관련 문서 검색
 # 함수 내부에서 st.session_state.vector_db 대신 vector_db 사용!
@@ -160,7 +160,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
         if model_type == "gpt":
             llm = ChatOpenAI(model="gpt-5.2", temperature=0.7, streaming=True)
         else:
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, streaming=True)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5", temperature=0.7, streaming=True)
 
         # 2. 컨텍스트 및 히스토리 구성
         context_text = "\n\n".join([d.page_content for d in docs])
