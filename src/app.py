@@ -128,9 +128,9 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 def run_rag_final(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
     # 1. 모델 설정 (안정적인 모델명으로 수정)
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
 
     # 2. 컨텍스트 구성
     context_text = "\n\n".join([d.page_content for d in docs])
