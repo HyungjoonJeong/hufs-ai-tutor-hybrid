@@ -40,7 +40,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("HUFS RAG 기반 AI 튜터 (GPT-5.2 & Gemini 2.5 pro)")
+st.title("HUFS RAG 기반 AI 튜터 (GPT-5.2 & Gemini 2.5)")
 st.caption("강의 자료 기반으로 GPT와 Gemini를 종합하여 답변하며 출처를 명확히 제시합니다.")
 
 # --------------------------------
@@ -83,7 +83,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
         llm = ChatOpenAI(model="gpt-5.2", temperature=0)
     else:
         # 2026년 기준 최신 안정 버전인 1.5-flash 권장
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5", temperature=0)
 
     # 2. 관련 문서 검색
 # 함수 내부에서 st.session_state.vector_db 대신 vector_db 사용!
@@ -161,7 +161,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
         if model_type == "gpt":
             llm = ChatOpenAI(model="gpt-5.2", temperature=0.7, streaming=True)
         else:
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.7, streaming=True)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5", temperature=0.7, streaming=True)
 
         # 2. 컨텍스트 및 히스토리 구성
         context_text = "\n\n".join([d.page_content for d in docs])
@@ -346,7 +346,7 @@ if question := st.chat_input("질문을 입력하세요"):
             st.info("🤖 GPT-5.2")
             area_gpt = st.empty()
         with col2:
-            st.info("♊ Gemini 2.5 pro")
+            st.info("♊ Gemini 2.5")
             area_gem = st.empty()
 
         # 4. 생성기 생성
