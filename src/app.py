@@ -93,6 +93,13 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
     template = """
 너는 대학 과목 계산 문제를 푸는 조교이다. 제공된 [문맥]의 공식과 수치를 바탕으로 문제를 풀어라.
 
+[수식 작성 규칙 - 중요]
+1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
+2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
+3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
+   (예: $$f(x) = \\frac{1}{\\sigma\\sqrt{2\\pi}} \exp...$$)
+4. 절대 [ ] 나 ( ) 로 수식을 감싸지 마라. 오직 $와 $$만 사용한다.
+
 [규칙]
 1. 풀이 과정을 가독성을 위해 단계별로 번호를 매겨 반드시 숫자 인덱스(1., 2., 3.)를 사용하여 답변을 구조화하여 상세히 설명하라.
 2. 수식은 LaTeX 형식이나 명확한 기호를 사용하여 제시하라.
@@ -114,21 +121,27 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 
 [풀이]
 """
-
-    prompt = PromptTemplate(
-        input_variables=["context", "question"],
-        template=template
+    prompt = template.format(
+        length_instruction=length_instruction,
+        chat_history=chat_history_str,
+        context=context_text,
+        question=question
     )
 
-    # 3. 답변 생성
-    response = llm.invoke(
-        prompt.format(
-            context=context,
-            question=question
-        )
-    )
+    # 3. 스트리밍 루프
+    try:
+        for chunk in llm.stream(prompt):
+            if hasattr(chunk, 'content'):
+                content = chunk.content
+            else:
+                content = str(chunk)
+            
+            if content:
+                yield content
+    except Exception as e:
+        yield f"\n⚠️ 모델({model_type}) 호출 에러: {str(e)}"
 
-    return response.content, docs
+
 # --------------------------------
 # 일반 RAG 체인
 # --------------------------------
@@ -161,7 +174,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
 3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
    (예: $$f(x) = \\frac{1}{\\sigma\\sqrt{2\\pi}} \exp...$$)
-4. 절대 [ ] 나 ( ) 로 수식을 감싸지 마라. 오직 $ 기호만 사용하라.
+4. 절대 [ ] 나 ( ) 로 수식을 감싸지 마라. 오직 $와 $$만 사용한다.
 
 [규칙]
 1. 가독성을 위해 반드시 숫자 인덱스(1., 2., 3.)를 사용하여 답변을 구조화하라.
@@ -357,29 +370,25 @@ if question := st.chat_input("질문을 입력하세요"):
             executor.submit(produce, gen_gem, q_gem)
 
             gpt_done, gem_done = False, False
+            # 이 루프가 핵심입니다. 
             while not (gpt_done and gem_done):
-                # GPT 한 글자 가져와서 업데이트
-                try:
+                # GPT 큐에 쌓인 모든 글자를 한 번에 다 털어내기
+                while not q_gpt.empty():
                     chunk = q_gpt.get_nowait()
                     if chunk is None: gpt_done = True
                     else:
                         full_gpt += chunk
-                        area_gpt.markdown(full_gpt + "▌") # 커서 효과
-                except queue.Empty:
-                    pass
+                        area_gpt.markdown(full_gpt + "▌")
 
-                # Gemini 한 글자 가져와서 업데이트
-                try:
+                # Gemini 큐도 동일하게 처리
+                while not q_gem.empty():
                     chunk = q_gem.get_nowait()
                     if chunk is None: gem_done = True
                     else:
                         full_gem += chunk
-                        area_gem.markdown(full_gem + "▌") # 커서 효과
-                except queue.Empty:
-                    pass
+                        area_gem.markdown(full_gem + "▌")
                 
-                import time
-                time.sleep(0.01) # UI 렌더링을 위한 아주 짧은 휴식
+                time.sleep(0.01)
 
         # 5. 최종 답변 정리 (커서 제거 및 참고문헌 추가)
         refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
