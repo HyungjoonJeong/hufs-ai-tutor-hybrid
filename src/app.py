@@ -125,33 +125,22 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 # --------------------------------
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
-def run_rag(question: str, answer_style: str, model_type: str, chat_history: list, vector_db):
-    # 1. 모델 및 히스토리 설정
+def run_rag_final(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
+    # 1. 모델 설정 (안정적인 모델명으로 수정)
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
- 
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
-# st.session_state 대신 인자로 받은 chat_history 사용
-    if chat_history is None:
-        chat_history = []
-    
-    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history])
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
 
-
-# st.session_state.vector_db 대신 인자로 받은 vector_db 사용!
-    retriever = vector_db.as_retriever(search_kwargs={"k": 7})
-    docs = retriever.invoke(question)
+    # 2. 컨텍스트 구성
     context_text = "\n\n".join([d.page_content for d in docs])
-
-    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in history])
-
+    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history])
+    
     length_instruction = (
         "핵심만 간결하게 답하라." if answer_style == "짧게" 
-        else "초보자도 이해할 수 있도록 자세히 설명하라."
+        else "자세히 설명하라."
     )
 
-    # 3. 프롬프트 구성 (f-string 대신 일반 문자열과 .format() 추천)
     template = """
 당신은 한국외국어대학교의 1타 강사 AI 튜터입니다. 
 제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
@@ -176,8 +165,6 @@ def run_rag(question: str, answer_style: str, model_type: str, chat_history: lis
 
 답변 (전문적이고 상세하게):
 """
-
-# 에러 방지를 위해 .format() 사용
     prompt = template.format(
         length_instruction=length_instruction,
         chat_history=chat_history_str,
@@ -186,7 +173,7 @@ def run_rag(question: str, answer_style: str, model_type: str, chat_history: lis
     )
 
     response = llm.invoke(prompt)
-    return response.content, docs
+    return response.content
 
 
 
@@ -284,80 +271,85 @@ with view_col2:
             st.markdown(msg["content"])
 
 # --------------------------------
-# 신규 질문 입력 및 처리
+# 신규 질문 입력 및 처리 (병렬 & 공통 검색 버전)
 # --------------------------------
 
 if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
-else:
-        # 1. 재료 미리 준비 (메인 스레드에서만 가능)
-        vdb = st.session_state.vector_db
+    else:
+        # 1. 공통 재료 준비 (메인 스레드에서 한 번만 검색!)
+        # 이렇게 하면 스레드 내부 AttributeError와 구글 API 충돌을 완벽히 막습니다.
+        with st.spinner("관련 강의 자료를 찾는 중..."):
+            retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
+            shared_docs = retriever.invoke(question) # 공통 검색 결과
+
         gpt_h = st.session_state.gpt_messages.copy()
         gem_h = st.session_state.gemini_messages.copy()
         
-# 2. 질문 저장 및 사용자 메시지 출력
+        # 세션에 사용자 질문 즉시 저장
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
 
+        # 화면에 사용자 질문 표시
         with st.chat_message("user"):
             st.markdown(question)
 
-        # 3. 레이아웃 컬럼 생성 (NameError 방지를 위해 미리 선언)
+        # 2. 레이아웃 설정 및 질문 분류
         col1, col2 = st.columns(2)
         q_type = classify_question(question)
 
-        # 2. 헬퍼 함수 정의 (전달받은 vdb를 run_rag에 다시 던져줌)
+        # 3. 병렬 실행을 위한 헬퍼 함수 정의
+        # 팁: 이제 run_rag는 vector_db 대신 검색된 docs를 직접 받도록 아래에서 수정할 겁니다.
         def fetch_gpt():
-            if q_type == "calculation":
-                # 계산기 함수도 (question, model_type, vdb) 순서로 맞춰주세요!
-                ans, src = run_calculation_chain(question, "gpt", vdb)
-            else:
-                # [수정포인트] 인자 5개를 정확히 순서대로 전달!
-                ans, src = run_rag(question, answer_style, "gpt", gpt_h, vdb)
-            
-            refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
-            return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+            try:
+                if q_type == "calculation":
+                    ans, _ = run_calculation_chain(question, "gpt", st.session_state.vector_db)
+                else:
+                    # run_rag에 shared_docs를 직접 넘겨줍니다.
+                    ans = run_rag_final(question, answer_style, "gpt", gpt_h, shared_docs)
+                
+                refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
+                return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+            except Exception as e:
+                return f"⚠️ GPT 오류 발생: {str(e)}"
 
         def fetch_gemini():
-            if q_type == "calculation":
-                ans, src = run_calculation_chain(question, "gemini", vdb)
-            else:
-                # [수정포인트] 여기도 인자 5개!
-                ans, src = run_rag(question, answer_style, "gemini", gem_h, vdb)
-            
-            refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in src])
-            return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+            try:
+                if q_type == "calculation":
+                    ans, _ = run_calculation_chain(question, "gemini", st.session_state.vector_db)
+                else:
+                    ans = run_rag_final(question, answer_style, "gemini", gem_h, shared_docs)
+                
+                refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
+                return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+            except Exception as e:
+                return f"⚠️ Gemini 오류 발생: {str(e)}"
 
-        # 3. 병렬 실행
+        # 4. 병렬 실행 시작
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_gpt = executor.submit(fetch_gpt)
             future_gemini = executor.submit(fetch_gemini)
 
-            # 화면에는 동시에 뱅글뱅글(Spinner)을 띄웁니다.
             with col1:
                 with st.chat_message("assistant", avatar="🤖"):
                     st.subheader("GPT-5.2")
-                    placeholder_gpt = st.empty()
-                    with placeholder_gpt:
-                        st.spinner("GPT 분석 중...")
+                    p_gpt = st.empty()
+                    p_gpt.info("GPT 분석 중...")
             
             with col2:
                 with st.chat_message("assistant", avatar="♊"):
                     st.subheader("Gemini 2.5")
-                    placeholder_gemini = st.empty()
-                    with placeholder_gemini:
-                        st.spinner("Gemini 분석 중...")
+                    p_gem = st.empty()
+                    p_gem.info("Gemini 분석 중...")
 
-            # 결과가 먼저 나오는 대로 가져와서 화면에 뿌립니다.
+            # 결과 수집
             final_gpt = future_gpt.result()
             final_gemini = future_gemini.result()
 
-            # 결과 화면 업데이트 및 세션 저장
-            with col1:
-                placeholder_gpt.markdown(final_gpt)
-                st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
+            # 화면 업데이트 및 저장
+            p_gpt.markdown(final_gpt)
+            st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
             
-            with col2:
-                placeholder_gemini.markdown(final_gemini)
-                st.session_state.gemini_messages.append({"role": "assistant", "content": final_gemini})
+            p_gem.markdown(final_gemini)
+            st.session_state.gemini_messages.append({"role": "assistant", "content": final_gemini})
