@@ -148,24 +148,24 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
 def run_rag_stream(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
-    # 1. 모델 설정
-    if model_type == "gpt":
-        # 현재 실존하는 모델명인 gpt-4o로 설정하는 것이 안전합니다.
-        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7, streaming=True)
-    else:
-        # [핵심 수정] Gemini도 스트리밍을 명시적으로 지원하도록 설정
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, streaming=True)
+    try:
+        # 1. 모델 설정 (최신 모델명 반영)
+        if model_type == "gpt":
+            llm = ChatOpenAI(model="gpt-5.2", temperature=0.7, streaming=True)
+        else:
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, streaming=True)
 
-    # 2. 컨텍스트 및 히스토리 구성
-    context_text = "\n\n".join([d.page_content for d in docs])
-    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in (chat_history or [])])
-    
-    length_instruction = (
-        "핵심 위주로 번호를 매겨 간결하게 답하라." if answer_style == "짧게" 
-        else "상세한 설명과 함께 단계별로 번호를 매겨 자세히 답하라."
-    )
+        # 2. 컨텍스트 및 히스토리 구성
+        context_text = "\n\n".join([d.page_content for d in docs])
+        chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in (chat_history or [])])
+        
+        length_instruction = (
+            "핵심 위주로 번호를 매겨 간결하게 답하라." if answer_style == "짧게" 
+            else "상세한 설명과 함께 단계별로 번호를 매겨 자세히 답하라."
+        )
 
-    template = """
+        template = """
+
 당신은 한국외국어대학교의 1타 강사 AI 튜터입니다. 
 제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
 
@@ -186,10 +186,6 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 7. 답변은 최소 3문단 이상의 충분한 분량으로 작성할 것.
 8. 강의 자료에 있는 예시나 수치를 적극적으로 인용할 것.
 9. 마지막에는 학습을 돕기 위해 '관련하여 추가로 알면 좋은 개념'을 두세 문장 덧붙일 것.
-10. {length_instruction}
-
-[이전 대화]
-{chat_history}
 
 [문맥]
 {context}
@@ -197,28 +193,22 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 [질문]
 {question}
 
-답변 (전문적이고 상세하게):
-"""
-    prompt = template.format(
-        length_instruction=length_instruction,
-        chat_history=chat_history_str,
-        context=context_text,
-        question=question
-    )
+답변:"""
+        # .format 인자 정확히 매칭
+        formatted_prompt = template.format(
+            context=context_text,
+            question=question
+        )
 
-    # 3. 안전한 스트리밍 루프
-    try:
-        for chunk in llm.stream(prompt):
-            # Gemini의 경우 content가 직접 올 수도 있고, 조각으로 올 수도 있습니다.
-            if hasattr(chunk, 'content'):
-                content = chunk.content
-            else:
-                content = str(chunk)
-            
+        # 3. 스트리밍 루프
+        for chunk in llm.stream(formatted_prompt):
+            content = chunk.content if hasattr(chunk, 'content') else str(chunk)
             if content:
                 yield content
+
     except Exception as e:
-        yield f"\n⚠️ 모델 응답 중 오류 발생 ({model_type}): {str(e)}"
+        # 에러 발생 시 yield로 에러 메시지를 화면에 출력
+        yield f"\n\n❌ [모델 에러] {model_type}: {str(e)}"
 
 
 
@@ -323,79 +313,67 @@ if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        # 1. 공통 검색 (메인 스레드)
+        # 1. 공통 검색
         with st.spinner("자료 찾는 중..."):
-            retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
+            retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 5})
             shared_docs = retriever.invoke(question)
 
-        # 2. 메시지 기록 저장
+        # 2. 메시지 기록
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
+        
         with st.chat_message("user"):
             st.markdown(question)
 
-        # 3. 레이아웃 및 빈 공간 생성
+        # 3. 화면 공간 확보
         col1, col2 = st.columns(2)
         with col1:
-            with st.chat_message("assistant", avatar="🤖"):
-                st.subheader("GPT-5.2")
-                area_gpt = st.empty()  # GPT가 써질 공간
+            st.info("🤖 GPT-5.2")
+            area_gpt = st.empty()
         with col2:
-            with st.chat_message("assistant", avatar="♊"):
-                st.subheader("Gemini 2.5")
-                area_gem = st.empty()  # Gemini가 써질 공간
+            st.info("♊ Gemini 2.5")
+            area_gem = st.empty()
 
-        # 4. 동시 스트리밍 처리 (핵심 로직)
+        # 4. 생성기 생성
         gen_gpt = run_rag_stream(question, answer_style, "gpt", st.session_state.gpt_messages[:-1], shared_docs)
         gen_gem = run_rag_stream(question, answer_style, "gemini", st.session_state.gemini_messages[:-1], shared_docs)
 
-        full_gpt, full_gem = "", ""
+        # 5. 스트리밍 실행 (Queue 방식)
+        q_gpt, q_gem = queue.Queue(), queue.Queue()
         
-        # 두 생성기(Generator)를 병렬로 돌리며 화면 업데이트
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # 각각의 스트림을 리스트로 한 번에 처리하기 위해 zip_longest와 유사한 로직 사용
-            # 여기서는 루프를 돌며 하나씩 업데이트합니다.
-            
-            # 주의: Streamlit은 메인 스레드에서만 UI 업데이트를 권장하므로,
-            # 데이터를 가져오는 건 병렬로 하되 뿌리는 건 루프를 활용합니다.
-            import queue
-            q_gpt, q_gem = queue.Queue(), queue.Queue()
+        def produce(gen, q):
+            for chunk in gen:
+                q.put(chunk)
+            q.put(None)
 
-            def produce(gen, q):
-                for chunk in gen:
-                    q.put(chunk)
-                q.put(None) # 끝 신호
-
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             executor.submit(produce, gen_gpt, q_gpt)
             executor.submit(produce, gen_gem, q_gem)
 
+            full_gpt, full_gem = "", ""
             gpt_done, gem_done = False, False
-            # 이 루프가 핵심입니다. 
-            while not (gpt_done and gem_done):
-                # GPT 큐에 쌓인 모든 글자를 한 번에 다 털어내기
-                while not q_gpt.empty():
-                    chunk = q_gpt.get_nowait()
-                    if chunk is None: gpt_done = True
-                    else:
-                        full_gpt += chunk
-                        area_gpt.markdown(full_gpt + "▌")
 
-                # Gemini 큐도 동일하게 처리
+            while not (gpt_done and gem_done):
+                # GPT 데이터 업데이트
+                while not q_gpt.empty():
+                    item = q_gpt.get()
+                    if item is None: gpt_done = True
+                    else: 
+                        full_gpt += item
+                        area_gpt.markdown(full_gpt + "▌")
+                
+                # Gemini 데이터 업데이트
                 while not q_gem.empty():
-                    chunk = q_gem.get_nowait()
-                    if chunk is None: gem_done = True
-                    else:
-                        full_gem += chunk
+                    item = q_gem.get()
+                    if item is None: gem_done = True
+                    else: 
+                        full_gem += item
                         area_gem.markdown(full_gem + "▌")
                 
-                time.sleep(0.01)
+                time.sleep(0.05)
 
-        # 5. 최종 답변 정리 (커서 제거 및 참고문헌 추가)
-        refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
-        ref_text = "\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-        
-        area_gpt.markdown(full_gpt + ref_text)
-        area_gem.markdown(full_gem + ref_text)
-        
-        st.session_state.gpt_messages.append({"role": "assistant", "content": full_gpt + ref_text})
-        st.session_state.gemini_messages.append({"role": "assistant", "content": full_gem + ref_text})
+        # 6. 마무리 저장
+        area_gpt.markdown(full_gpt)
+        area_gem.markdown(full_gem)
+        st.session_state.gpt_messages.append({"role": "assistant", "content": full_gpt})
+        st.session_state.gemini_messages.append({"role": "assistant", "content": full_gem})
