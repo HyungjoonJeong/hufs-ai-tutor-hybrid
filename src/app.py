@@ -1,6 +1,8 @@
 import streamlit as st
 import os
 import tempfile
+import queue
+import time
 import concurrent.futures # 파일 최상단에 추가해주세요!
 from dotenv import load_dotenv
 
@@ -132,20 +134,21 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 # --------------------------------
 # 2. 메인 답변 체인 (GPT-4o 사용 - 정밀한 논리)
 # run_rag 정의 부분 수정
-def run_rag_final(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
-    # 1. 모델 설정 (안정적인 모델명으로 수정)
+def run_rag_stream(question: str, answer_style: str, model_type: str, chat_history: list, docs: list):
+    # 1. 모델 설정 (안정적인 모델명 사용)
     if model_type == "gpt":
-        llm = ChatOpenAI(model="gpt-5.2", temperature=0.7)
+        # streaming=True를 명시적으로 넣어주는 것이 좋습니다.
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.7, streaming=True)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
 
-    # 2. 컨텍스트 구성
+    # 2. 컨텍스트 및 히스토리 구성
     context_text = "\n\n".join([d.page_content for d in docs])
-    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history])
+    chat_history_str = "\n".join([f"{m['role']}: {m['content']}" for m in (chat_history or [])])
     
     length_instruction = (
-        "핵심만 간결하게 답하라." if answer_style == "짧게" 
-        else "자세히 설명하라."
+        "핵심 위주로 번호를 매겨 간결하게 답하라." if answer_style == "짧게" 
+        else "상세한 설명과 함께 단계별로 번호를 매겨 자세히 답하라."
     )
 
     template = """
@@ -181,6 +184,19 @@ def run_rag_final(question: str, answer_style: str, model_type: str, chat_histor
         context=context_text,
         question=question
     )
+
+    # 3. 핵심: return 대신 yield 사용
+    # llm.invoke 대신 llm.stream을 사용합니다.
+    for chunk in llm.stream(prompt):
+        # 모델별로 chunk에서 내용을 꺼내는 방식이 다를 수 있어 안전하게 처리합니다.
+        if hasattr(chunk, 'content'):
+            content = chunk.content
+        else:
+            content = str(chunk)
+            
+        if content:
+            yield content  # 한 글자(또는 한 단어)씩 밖으로 내보냄
+
 
     response = llm.invoke(prompt)
     return response.content
@@ -288,78 +304,83 @@ if question := st.chat_input("질문을 입력하세요"):
     if st.session_state.vector_db is None:
         st.warning("먼저 PDF를 학습시켜주세요.")
     else:
-        # 1. 공통 재료 준비 (메인 스레드에서 한 번만 검색!)
-        # 이렇게 하면 스레드 내부 AttributeError와 구글 API 충돌을 완벽히 막습니다.
-        with st.spinner("관련 강의 자료를 찾는 중..."):
+        # 1. 공통 검색 (메인 스레드)
+        with st.spinner("자료 찾는 중..."):
             retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 7})
-            shared_docs = retriever.invoke(question) # 공통 검색 결과
+            shared_docs = retriever.invoke(question)
 
-        gpt_h = st.session_state.gpt_messages.copy()
-        gem_h = st.session_state.gemini_messages.copy()
-        
-        # 세션에 사용자 질문 즉시 저장
+        # 2. 메시지 기록 저장
         st.session_state.gpt_messages.append({"role": "user", "content": question})
         st.session_state.gemini_messages.append({"role": "user", "content": question})
-
-        # 화면에 사용자 질문 표시
         with st.chat_message("user"):
             st.markdown(question)
 
-        # 2. 레이아웃 설정 및 질문 분류
+        # 3. 레이아웃 및 빈 공간 생성
         col1, col2 = st.columns(2)
-        q_type = classify_question(question)
+        with col1:
+            with st.chat_message("assistant", avatar="🤖"):
+                st.subheader("GPT-5.2")
+                area_gpt = st.empty()  # GPT가 써질 공간
+        with col2:
+            with st.chat_message("assistant", avatar="♊"):
+                st.subheader("Gemini 2.5")
+                area_gem = st.empty()  # Gemini가 써질 공간
 
-        # 3. 병렬 실행을 위한 헬퍼 함수 정의
-        # 팁: 이제 run_rag는 vector_db 대신 검색된 docs를 직접 받도록 아래에서 수정할 겁니다.
-        def fetch_gpt():
-            try:
-                if q_type == "calculation":
-                    ans, _ = run_calculation_chain(question, "gpt", st.session_state.vector_db)
-                else:
-                    # run_rag에 shared_docs를 직접 넘겨줍니다.
-                    ans = run_rag_final(question, answer_style, "gpt", gpt_h, shared_docs)
-                
-                refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
-                return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-            except Exception as e:
-                return f"⚠️ GPT 오류 발생: {str(e)}"
+        # 4. 동시 스트리밍 처리 (핵심 로직)
+        gen_gpt = run_rag_stream(question, answer_style, "gpt", st.session_state.gpt_messages[:-1], shared_docs)
+        gen_gem = run_rag_stream(question, answer_style, "gemini", st.session_state.gemini_messages[:-1], shared_docs)
 
-        def fetch_gemini():
-            try:
-                if q_type == "calculation":
-                    ans, _ = run_calculation_chain(question, "gemini", st.session_state.vector_db)
-                else:
-                    ans = run_rag_final(question, answer_style, "gemini", gem_h, shared_docs)
-                
-                refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
-                return f"{ans}\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
-            except Exception as e:
-                return f"⚠️ Gemini 오류 발생: {str(e)}"
-
-        # 4. 병렬 실행 시작
+        full_gpt, full_gem = "", ""
+        
+        # 두 생성기(Generator)를 병렬로 돌리며 화면 업데이트
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_gpt = executor.submit(fetch_gpt)
-            future_gemini = executor.submit(fetch_gemini)
-
-            with col1:
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.subheader("GPT-5.2")
-                    p_gpt = st.empty()
-                    p_gpt.info("GPT 분석 중...")
+            # 각각의 스트림을 리스트로 한 번에 처리하기 위해 zip_longest와 유사한 로직 사용
+            # 여기서는 루프를 돌며 하나씩 업데이트합니다.
             
-            with col2:
-                with st.chat_message("assistant", avatar="♊"):
-                    st.subheader("Gemini 2.5")
-                    p_gem = st.empty()
-                    p_gem.info("Gemini 분석 중...")
+            # 주의: Streamlit은 메인 스레드에서만 UI 업데이트를 권장하므로,
+            # 데이터를 가져오는 건 병렬로 하되 뿌리는 건 루프를 활용합니다.
+            import queue
+            q_gpt, q_gem = queue.Queue(), queue.Queue()
 
-            # 결과 수집
-            final_gpt = future_gpt.result()
-            final_gemini = future_gemini.result()
+            def produce(gen, q):
+                for chunk in gen:
+                    q.put(chunk)
+                q.put(None) # 끝 신호
 
-            # 화면 업데이트 및 저장
-            p_gpt.markdown(final_gpt)
-            st.session_state.gpt_messages.append({"role": "assistant", "content": final_gpt})
-            
-            p_gem.markdown(final_gemini)
-            st.session_state.gemini_messages.append({"role": "assistant", "content": final_gemini})
+            executor.submit(produce, gen_gpt, q_gpt)
+            executor.submit(produce, gen_gem, q_gem)
+
+            gpt_done, gem_done = False, False
+            while not (gpt_done and gem_done):
+                # GPT 한 글자 가져와서 업데이트
+                try:
+                    chunk = q_gpt.get_nowait()
+                    if chunk is None: gpt_done = True
+                    else:
+                        full_gpt += chunk
+                        area_gpt.markdown(full_gpt + "▌") # 커서 효과
+                except queue.Empty:
+                    pass
+
+                # Gemini 한 글자 가져와서 업데이트
+                try:
+                    chunk = q_gem.get_nowait()
+                    if chunk is None: gem_done = True
+                    else:
+                        full_gem += chunk
+                        area_gem.markdown(full_gem + "▌") # 커서 효과
+                except queue.Empty:
+                    pass
+                
+                import time
+                time.sleep(0.01) # UI 렌더링을 위한 아주 짧은 휴식
+
+        # 5. 최종 답변 정리 (커서 제거 및 참고문헌 추가)
+        refs = set([f"- {d.metadata['source']} p.{d.metadata['page'] + 1}" for d in shared_docs])
+        ref_text = "\n\n---\n**참고:**\n" + "\n".join(sorted(refs))
+        
+        area_gpt.markdown(full_gpt + ref_text)
+        area_gem.markdown(full_gem + ref_text)
+        
+        st.session_state.gpt_messages.append({"role": "assistant", "content": full_gpt + ref_text})
+        st.session_state.gemini_messages.append({"role": "assistant", "content": full_gem + ref_text})
