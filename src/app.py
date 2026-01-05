@@ -94,7 +94,7 @@ def run_calculation_chain(question: str, model_type: str, vector_db):
 제공된 [문맥]의 공식과 수치를 바탕으로 문제를 풀어라.
 
 [수식 작성 규칙 - 중요]
-1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
+1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라. LaTeX 수식 안에서 \\text{{...}} 구문을 절대 사용하지 마라. ({{ }} 두 번 사용)
 2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
 3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
 (예: $$f(x) = \\frac{{1}}{{\\sigma\\sqrt{{2\\pi}}}} \exp...$$)
@@ -185,7 +185,7 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 제공된 [강의 자료]를 바탕으로 학생의 질문에 답변하세요.
 
 [수식 작성 규칙 - 중요]
-1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라.
+1. 모든 수학 공식이나 변수는 반드시 LaTeX 형식을 사용하라. LaTeX 수식 안에서 \\text{{...}} 구문을 절대 사용하지 마라. ({{ }} 두 번 사용)
 2. 문장 안의 짧은 수식은 $기호 하나로 감싸라. (예: $P(Z < z)$)
 3. 별도의 줄에 표시해야 하는 복잡한 공식은 $$기호 두 개로 감싸라.
 (예: $$f(x) = \\frac{{1}}{{\\sigma\\sqrt{{2\\pi}}}} \exp...$$)
@@ -226,7 +226,10 @@ def run_rag_stream(question: str, answer_style: str, model_type: str, chat_histo
 
 답변:"""
         # .format 인자 정확히 매칭
+# 3. 템플릿에 변수 주입 (여기서 인덱스 에러가 났던 것임)
         formatted_prompt = template.format(
+            length_instruction=length_instruction,
+            chat_history=chat_history_str,
             context=context_text,
             question=question
         )
